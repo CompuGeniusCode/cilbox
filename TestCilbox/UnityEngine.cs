@@ -257,6 +257,8 @@ namespace UnityEngine
 
 		public static implicit operator bool(GameObject obj) { return obj != null; }
 
+		public void SetActive( bool active ) { }
+
 		public T CreateComponent<T>() where T: Component, new() {
 			return (T)AddComponent( typeof(T) );
 		}

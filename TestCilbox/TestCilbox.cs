@@ -374,6 +374,12 @@ namespace TestCilbox
 				perfRoot.peer = perfPeer;
 			}
 
+			GameObject faultFramesGo = new GameObject("FaultFramesToProxy");
+			FaultFramesBehaviour faultFrames = faultFramesGo.CreateComponent<FaultFramesBehaviour>();
+			GameObject faultFramesPeerGo = new GameObject("FaultFramesPeerToProxy");
+			FaultFramesPeer faultFramesPeer = faultFramesPeerGo.CreateComponent<FaultFramesPeer>();
+			faultFrames.peer = faultFramesPeer;
+
 			GameObject cbobj = new GameObject("BasicCilbox");
 			Cilbox.Cilbox cb = cbobj.AddComponent<CilboxTester>();
 			cb.exportDebuggingData = true;
@@ -461,6 +467,8 @@ namespace TestCilbox
 			proxy.GetType().GetMethod("FixedUpdate",BindingFlags.Instance|BindingFlags.NonPublic,Type.EmptyTypes).Invoke( proxy, new object[0] );
 			Validator.Validate( "Execution after timeout", "disabled" );
 
+			// a timeout disables its own proxy like any fault; re-enabling the box no longer revives it
+			Validator.Set( "Proxy Disabled After Timeout", proxy.disabled.ToString() );
 			cb.disabled = false;
 			proxy.GetType().GetMethod("FixedUpdate",BindingFlags.Instance|BindingFlags.NonPublic,Type.EmptyTypes).Invoke( proxy, new object[0] );
 
@@ -468,8 +476,8 @@ namespace TestCilbox
 			Validator.Set("Real timeoutLengthUs", cb.timeoutLengthUs.ToString() );
 			Validator.Validate("Real timeoutLengthUs", cb.MaxTimeoutLengthUs.ToString() );
 
-			Validator.Validate( "Manual Recover After Timeout", "recovered" );
-			Validator.Validate( "FixedUpdate", "called" );
+			Validator.Validate( "Proxy Disabled After Timeout", "True" );
+			Validator.Validate( "Execution after timeout", "disabled" );
 
 			Validator.Validate("Dispose", "disposed" );
 			Validator.Validate("TryFinally", "finally");
@@ -760,12 +768,42 @@ namespace TestCilbox
 			Validator.Validate("ThrowFromOtherBehaviour2Finally", "finally");
 			Validator.Validate("ThrowFromOtherConstructor", "caught");
 
-			Validator.ValidateCount($"CilboxDisabled_{cb.GetType().FullName}", 1 );
+			Validator.ValidateCount($"CilboxDisabled_{cb.GetType().FullName}", 0 );
 
 			if( runPerf )
 			{
 				RunPerfSuite(cb, perfRootProxy, perfPeerProxy);
 			}
+
+			bool reporterFired = false;
+			System.Collections.Generic.List<string> capturedFrames = null;
+			Cilbox.CilboxFault.InterpretedReporter = ( uhe ) => { reporterFired = true; capturedFrames = uhe.Frames; };
+			cb.disabled = false;
+			Cilbox.CilboxProxy faultFramesProxy = faultFramesGo.GetComponents<Cilbox.CilboxProxy>()[0];
+			try
+			{
+				faultFramesProxy.GetType().GetMethod( "Start", BindingFlags.Instance | BindingFlags.NonPublic, Type.EmptyTypes ).Invoke( faultFramesProxy, new object[0] );
+			}
+			catch( TargetInvocationException ) { }
+			bool framesHasPeer = false;
+			bool framesHasStart = false;
+			if( capturedFrames != null )
+			{
+				foreach( string frame in capturedFrames )
+				{
+					if( frame.Contains( "ThrowFromPeer" ) ) framesHasPeer = true;
+					if( frame.Contains( "FaultFramesBehaviour" ) && frame.Contains( "Start" ) ) framesHasStart = true;
+				}
+			}
+			Cilbox.CilboxFault.InterpretedReporter = null;
+			Validator.Set( "Fault Report Fired", reporterFired.ToString() );
+			Validator.Set( "Fault Frames Count OK", ( capturedFrames != null && capturedFrames.Count >= 2 ).ToString() );
+			Validator.Set( "Fault Frames Has Peer", framesHasPeer.ToString() );
+			Validator.Set( "Fault Frames Has Start", framesHasStart.ToString() );
+			Validator.Validate( "Fault Report Fired", "True" );
+			Validator.Validate( "Fault Frames Count OK", "True" );
+			Validator.Validate( "Fault Frames Has Peer", "True" );
+			Validator.Validate( "Fault Frames Has Start", "True" );
 
 			return -1 * Validator.NumValidationErrors();
 		}

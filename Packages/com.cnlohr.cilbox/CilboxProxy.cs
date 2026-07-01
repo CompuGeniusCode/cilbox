@@ -26,6 +26,15 @@ namespace Cilbox
 		private bool proxyWasSetup = false;
 		private bool proxyLoadInProgress = false;
 
+		public bool disabled = false;
+
+		public void DisableProxy()
+		{
+			if( disabled ) return;
+			disabled = true;
+			gameObject.SetActive( false );
+		}
+
 		private void ProxyDebugLog( string message )
 		{
 				Debug.Log( $"[CilboxProxy:{gameObject.name}] {message}" );

@@ -170,6 +170,8 @@ namespace Cilbox
 
 		public object Interpret( CilboxProxy ths, object [] parametersIn )
 		{
+			if( ths != null && ths.disabled ) return null;
+
 			int plen = parametersIn?.Length ?? 0;
 			int thisOffset = isStatic ? 0 : 1;
 
@@ -198,17 +200,10 @@ namespace Cilbox
 			catch( Exception e )
 			{
 				parentClass.box.InterpreterExit();
-
-				if (e is CilboxUnhandledInterpretedException uhe)
-				{
-					// strip the throwee just in case, and re-throw a normal runtime exception
-					string exceptionTypeName = uhe.Throwee?.GetType().FullName ?? "null";
-					string reason = $"Exception of type {exceptionTypeName} was unhandled in interpreted code";
-					parentClass.box.DisableWithReason(reason); // CilboxUnhandledInterpretedException bypasses the box disable
-					throw new CilboxInterpreterRuntimeException(reason, uhe.ClassName, uhe.MethodName, uhe.PC);
-				}
-
-				Debug.Log( e.ToString() );
+				if( ths != null ) ths.DisableProxy();
+				else parentClass.box.DisableWithReason(e.ToString());
+				CilboxFault.Report( e );
+				if( e is CilboxUnhandledInterpretedException uhe && uhe.Throwee is System.Exception te ) throw te;
 				throw;
 			}
 			parentClass.box.InterpreterExit();
@@ -249,7 +244,6 @@ namespace Cilbox
 			bool cont = true;
 			int pc = 0;
 			CilMetadataTokenInfo constrainedMeta = null;
-			try
 			{
 				do
 				{
@@ -408,7 +402,7 @@ spiperf.Begin();
 									}
 									catch (CilboxUnhandledInterpretedException e)
 									{
-										interpretedThrow(currentInstruction, e.Throwee);
+										interpretedThrow(currentInstruction, e.Throwee, e.Frames);
 									}
 									stackBuffer[++sp].LoadObject( newObj );
 								}
@@ -426,7 +420,7 @@ spiperf.Begin();
 									}
 									catch (CilboxUnhandledInterpretedException e)
 									{
-										interpretedThrow(currentInstruction, e.Throwee);
+										interpretedThrow(currentInstruction, e.Throwee, e.Frames);
 									}
 								}
 
@@ -1592,23 +1586,6 @@ spiperf.End();
 				}
 				while( cont );
 			}
-			catch (CilboxUnhandledInterpretedException)
-			{
-				// don't break program flow for interpreted exceptions; we want to pass flow back to the outer call.
-				throw;
-			}
-			catch( Exception e )
-			{
-				string fullError = $"Breakwarn: {e.ToString()} Class: {parentClass.className}, Function: {methodName}, Bytecode: {pc}";
-				box.DisableWithReason(fullError);
-
-				if (e is CilboxInterpreterRuntimeException)
-				{
-					throw;
-				}
-
-				throw new CilboxInterpreterRuntimeException($"Breakwarn: Unhandled exception", e, parentClass.className, methodName, pc);
-			}
 #if UNITY_EDITOR
 			perfMarkerInterpret.End();
 #endif
@@ -1684,13 +1661,15 @@ spiperf.End();
 				return newObj;
 			}
 
-			void interpretedThrow(int currentInstruction, object thrownObj)
+			void interpretedThrow(int currentInstruction, object thrownObj, System.Collections.Generic.List<string> priorFrames = null)
 			{
 				sp = -1;
 				exceptionRegister = new StackElement() { type = StackType.Object, o = thrownObj };
+				System.Collections.Generic.List<string> frames = priorFrames != null ? new System.Collections.Generic.List<string>(priorFrames) : new System.Collections.Generic.List<string>();
+				frames.Add(parentClass.className + "|" + methodName + "|" + currentInstruction);
 				if (!hasExceptionClauses)
 				{
-					throw new CilboxUnhandledInterpretedException("Exception thrown with no handlers: " + thrownObj.ToString(), thrownObj, parentClass.className, methodName, currentInstruction);
+					throw new CilboxUnhandledInterpretedException(thrownObj.ToString() + " in interpreted world script", thrownObj, parentClass.className, methodName, currentInstruction, frames);
 				}
 
 				CilboxExceptionHandlingClause found = null;
@@ -1745,7 +1724,7 @@ spiperf.End();
 
 				if (found == null)
 				{
-					throw new CilboxUnhandledInterpretedException("No handlers matched exception: " + thrownObj.ToString(), thrownObj, parentClass.className, methodName, currentInstruction);
+					throw new CilboxUnhandledInterpretedException(thrownObj.ToString() + " in interpreted world script", thrownObj, parentClass.className, methodName, currentInstruction, frames);
 				}
 
 				leaveRegionEnqueueFinallys(currentInstruction, found.HandlerOffset, true);

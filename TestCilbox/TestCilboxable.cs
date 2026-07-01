@@ -1066,4 +1066,22 @@ namespace TestCilbox
 			return PerfUtility.StopwatchToUs(sw);
 		}
 	}
+	[Cilboxable]
+	public class FaultFramesBehaviour : MonoBehaviour
+	{
+		public FaultFramesPeer peer;
+		public void Start()
+		{
+			peer.ThrowFromPeer();
+		}
+	}
+
+	[Cilboxable]
+	public class FaultFramesPeer : MonoBehaviour
+	{
+		public void ThrowFromPeer()
+		{
+			throw new Exception("Injected nested fault");
+		}
+	}
 }
